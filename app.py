@@ -1,58 +1,65 @@
 
 import streamlit as st
-import re
 import pandas as pd
+import re
 
 st.set_page_config(page_title="밴드 상품 정리기", layout="wide")
-st.title("📦 밴드 상품 붙여넣기 자동 정리기")
 
-text = st.text_area("밴드 게시글 복사해서 붙여넣기 ✂️", height=400)
-process = st.button("✅ 정리하기")
+st.title("📦 밴드 상품 정리표 - 프린트용 (A4 현장 수량체크)")
+st.caption("밴드 게시글을 붙여넣기 ✂️")
 
-def split_unit_from_name(name):
-    unit_keywords = ["한송이", "한봉", "한팩", "한단", "1개", "1봉", "1팩", "1단", "1병", "2병", 
-                     "1세트", "한세트", "KG", "kg", "g", "ml", "인분"]
-    for keyword in unit_keywords:
-        if keyword in name:
-            return name.replace(keyword, "").strip(), keyword
-    # 괄호 안 단위 추출 시도
-    match = re.search(r"(\(.*?\))", name)
-    if match:
-        return name.replace(match.group(1), "").strip(), match.group(1)
-    return name.strip(), ""
+text = st.text_area(" ", height=300)
 
-def parse_product_lines(lines):
-    data = []
+def extract_products(text):
+    lines = text.split("\n")
+    products = []
     current_name = ""
+    current_unit = ""
+    current_price = ""
+
     for line in lines:
         line = line.strip()
-        if not line:
-            continue
-        if "👉" not in line and any(char.isalpha() or '\uac00' <= char <= '\ud7a3' for char in line):
-            current_name = re.sub(r"^[^가-힣a-zA-Z]*", "", line)
-        elif "👉" in line:
-            line = line.replace(",", "").replace("→", "➡")
-            discount_price_match = re.search(r"➡.*?(\d+[,.]?\d*)원", line)
-            if discount_price_match:
-                prices = [discount_price_match.group(1)]
-            else:
-                prices = re.findall(r"(\d+[,.]?\d*)원", line)
-            units = re.findall(r"(1[개봉병팩단세트줄]+|2[개봉병팩단세트줄]+|한[개봉병팩단세트줄]+|\d+g|\d+ml|\d+KG|\d+인분)", line)
-            name_only, extracted_unit = split_unit_from_name(current_name)
-            if prices:
-                price = f"{int(float(prices[-1].replace(',', ''))):,}원"  # 할인 가격만 사용
-                unit = units[0] if units else extracted_unit
-                data.append([name_only, unit, price, "", ""])
-    return data
 
-if process and text:
-    lines = text.split("\n")
-    parsed = parse_product_lines(lines)
-    if parsed:
-        df = pd.DataFrame(parsed, columns=["상품명", "단위", "단가", "주문수량", "실수량"])
-        st.success("✅ 정리 완료! 아래에서 복사하거나 다운로드하세요.")
-        st.dataframe(df, use_container_width=True, height=len(df) * 35 + 50)
-        csv = df.to_csv(index=False).encode("utf-8-sig")
-        st.download_button("📥 엑셀로 다운로드", csv, file_name="band_products.csv", mime="text/csv")
+        if "👉" in line:
+            items = re.findall(r"(?P<unit>\d+[a-zA-Z가-힣]*)\s*(\([^\)]+\))?\s*[➡→→~]*\s*([\d,]+)원", line)
+            if items:
+                for item in items:
+                    unit = item[0]
+                    price = item[2]
+                    if current_name:
+                        products.append([current_name.strip(), unit.strip(), f"{price}원"])
+            continue
+
+        if "➡️" in line and "원" in line:
+            # 할인 표기
+            parts = re.split(r"[➡→~]", line)
+            if len(parts) > 1:
+                price_part = parts[-1]
+                price_match = re.search(r"(\d{1,3}(,\d{3})*)원", price_part)
+                if price_match and current_name:
+                    products.append([current_name.strip(), "", price_match.group(1) + "원"])
+            continue
+
+        if any(unit in line for unit in ["개", "g", "ml", "KG", "세트", "팩", "병", "단", "송이"]):
+            name_line = re.sub(r"^[^가-힣A-Za-z]*", "", line)
+            current_name = name_line.strip()
+
+    return pd.DataFrame(products, columns=["상품명", "단위", "단가"])
+
+if st.button("정리하기"):
+    if text.strip():
+        df = extract_products(text)
+        st.success("정리 완료! 아래에서 엑셀로 저장할 수 있어요 ✅")
+        st.dataframe(df, use_container_width=True)
+
+        file_path = "/mnt/data/정리된_상품표.xlsx"
+        df.to_excel(file_path, index=False)
+        with open(file_path, "rb") as f:
+            st.download_button(
+                label="📥 엑셀로 저장하기",
+                data=f,
+                file_name="정리된_상품표.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
     else:
-        st.warning("상품 정보가 정상적으로 감지되지 않았어요. 다시 확인해 주세요.")
+        st.warning("게시글을 먼저 붙여넣어주세요.")

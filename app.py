@@ -1,68 +1,50 @@
 
 import streamlit as st
-import pandas as pd
 import re
-import io
+import pandas as pd
 
-st.title("📋 밴드 상품 정리표 - 2줄 출력 (2개이상 시 표기, 생략 가능)")
+st.set_page_config(page_title="밴드 상품 정리기", layout="wide")
 
-input_text = st.text_area("밴드 게시글 붙여넣기 ✂️", height=300)
+st.title("📦 밴드 상품 붙여넣기 자동 정리기")
 
-if st.button("정리하기"):
-    rows = []
-    last_item_name = ""
+text = st.text_area("밴드 게시글 복사해서 붙여넣기 ✂️", height=400)
 
-    for line in input_text.splitlines():
+def parse_product_lines(lines):
+    data = []
+    current_name = ""
+    for i, line in enumerate(lines):
         line = line.strip()
+        # 상품명 추출
         if not line:
             continue
+        if "👉" not in line and re.search(r"[가-힣]", line):
+            current_name = re.sub(r"^[^가-힣]*", "", line)
+        # 단가 줄
+        elif "👉" in line:
+            prices = re.findall(r"(\d+[,.]?\d*)원", line.replace(",", ""))
+            units = re.findall(r"(\d+[개봉팩단통세트송이]+|한[개봉팩단통세트송이]+)", line)
+            if prices:
+                if len(prices) == 1:
+                    price = f"{int(float(prices[0])):,}원"
+                    unit = units[0] if units else ""
+                    data.append([current_name.strip(), unit, price])
+                elif len(prices) >= 2:
+                    price1 = f"{int(float(prices[0])):,}원"
+                    price2 = f"{int(float(prices[1])):,}원"
+                    unit1 = units[0] if len(units) >= 1 else ""
+                    unit2 = units[1] if len(units) >= 2 else unit1
+                    data.append([current_name.strip(), unit1, price1])
+                    data.append([current_name.strip(), unit2 + " (2개이상 시)", price2])
+    return data
 
-        # 가격 두 개 있는 경우
-        price_matches = re.findall(r"(\d{1,3}(?:,\d{3})?원)", line)
-        if price_matches:
-            # 단가 추출
-            price1 = price_matches[0]
-            price2 = price_matches[1] if len(price_matches) > 1 else ""
-
-            # 단위 추출
-            item_name = last_item_name if last_item_name else "상품명 없음"
-            unit_match = re.search(r"(한|\d+)\s*(봉|팩|세트|개|포|단|병|입|줄|통|L|ml|g|장|P|개입|묶음)?(\(.*?\))?", item_name)
-            unit = unit_match.group(0) if unit_match else ""
-
-            # 첫 줄: 상품명 + 단가
-            rows.append({
-                "상품명": item_name,
-                "단위": unit,
-                "단가": price1,
-                "구매수량": "",
-                "실수량": ""
-            })
-
-            # 두 번째 줄: 2개 이상 가격 (있을 경우만 추가)
-            if price2:
-                rows.append({
-                    "상품명": f"{item_name} (2개이상 시)",
-                    "단위": unit,
-                    "단가": price2,
-                    "구매수량": "",
-                    "실수량": ""
-                })
-            last_item_name = ""
-        else:
-            last_item_name = re.sub(r"[📣⭕️❇️✴️👉➡️💥🎂🎁🧼👕🍓🧀🌽🍑🥬🥕🍖🚚⭐️🥩🔉🟡🎈🧨]+", "", line).strip()
-
-    if rows:
-        df = pd.DataFrame(rows)
-        st.success("정리 완료! 아래에서 엑셀로 저장할 수 있어요 ✅")
-        st.dataframe(df)
-
-        output = io.BytesIO()
-        df.to_excel(output, index=False, engine='openpyxl')
-        st.download_button(
-            label="📥 엑셀로 저장하기 (2줄 조건 출력)",
-            data=output.getvalue(),
-            file_name="2줄출력_상품정리표_조건형.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
+if text:
+    lines = text.split("\n")
+    parsed = parse_product_lines(lines)
+    if parsed:
+        df = pd.DataFrame(parsed, columns=["상품명", "단위", "단가"])
+        st.success("✅ 정리 완료! 아래에서 복사하거나 다운로드하세요.")
+        st.dataframe(df, use_container_width=True)
+        csv = df.to_csv(index=False).encode("utf-8-sig")
+        st.download_button("📥 엑셀로 다운로드", csv, file_name="band_products.csv", mime="text/csv")
     else:
-        st.warning("상품명과 가격이 감지되지 않았어요 😢")
+        st.warning("상품 정보가 정상적으로 감지되지 않았어요. 다시 확인해 주세요.")

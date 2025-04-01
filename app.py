@@ -2,71 +2,57 @@
 import streamlit as st
 import re
 import pandas as pd
-from io import BytesIO
 
-st.set_page_config(layout="wide")
-st.title("📦 밴드 상품 정리표 - 프린트용 (A4 현장 수량체크)")
+st.set_page_config(page_title="밴드 상품 정리기", layout="wide")
+st.title("📦 밴드 상품 붙여넣기 자동 정리기")
 
-text_input = st.text_area("밴드 게시글 붙여넣기 ✂️", height=300)
+text = st.text_area("밴드 게시글 복사해서 붙여넣기 ✂️", height=400)
+process = st.button("✅ 정리하기")
 
-# 단위 후보 리스트
-UNITS = ["한세트", "1세트", "2세트", "세트", "개", "병", "팩", "봉", "줄", "망", "통", "단", "g", "kg", "KG", "ml", "L", "포", "장"]
+def split_unit_from_name(name):
+    unit_keywords = ["한송이", "한봉", "한팩", "한단", "1개", "1봉", "1팩", "1단", "1병", "2병", 
+                     "1세트", "한세트", "KG", "kg", "g", "ml", "인분"]
+    for keyword in unit_keywords:
+        if keyword in name:
+            return name.replace(keyword, "").strip(), keyword
+    # 괄호 안 단위 추출 시도
+    match = re.search(r"(\(.*?\))", name)
+    if match:
+        return name.replace(match.group(1), "").strip(), match.group(1)
+    return name.strip(), ""
 
-# 단위 패턴 생성
-unit_pattern = r"(\d+\s*(?:{}))".format("|".join(map(re.escape, UNITS)))
-
-def extract_price(text):
-    match = re.search(r"[➡→]\s*.*?(\d{1,3}(,\d{3})*)원", text)
-    if not match:
-        match = re.search(r"(\d{1,3}(,\d{3})*)원", text)
-    return match.group(1) + "원" if match else ""
-
-def extract_unit_and_name(name):
-    unit = ""
-    for u in UNITS:
-        if u in name:
-            unit = u
-            name = name.replace(u, "").strip()
-            break
-    return name.strip(), unit
-
-def parse_products(text):
-    lines = text.split("\n")
-    products = []
+def parse_product_lines(lines):
+    data = []
     current_name = ""
     for line in lines:
-        if not line.strip():
+        line = line.strip()
+        if not line:
             continue
-        price = extract_price(line)
-        if price:
-            name_line = current_name
-            name_line, unit = extract_unit_and_name(name_line)
-            products.append({"상품명": name_line, "단위": unit, "단가": price})
-        else:
-            current_name = re.sub(r"^[\W\d]+", "", line).strip()
-    return products
+        if "👉" not in line and any(char.isalpha() or '\uac00' <= char <= '\ud7a3' for char in line):
+            current_name = re.sub(r"^[^가-힣a-zA-Z]*", "", line)
+        elif "👉" in line:
+            line = line.replace(",", "").replace("→", "➡")
+            discount_price_match = re.search(r"➡.*?(\d+[,.]?\d*)원", line)
+            if discount_price_match:
+                prices = [discount_price_match.group(1)]
+            else:
+                prices = re.findall(r"(\d+[,.]?\d*)원", line)
+            units = re.findall(r"(1[개봉병팩단세트줄]+|2[개봉병팩단세트줄]+|한[개봉병팩단세트줄]+|\d+g|\d+ml|\d+KG|\d+인분)", line)
+            name_only, extracted_unit = split_unit_from_name(current_name)
+            if prices:
+                price = f"{int(float(prices[-1].replace(',', ''))):,}원"  # 할인 가격만 사용
+                unit = units[0] if units else extracted_unit
+                data.append([name_only, unit, price, "", ""])
+    return data
 
-if text_input:
-    product_data = parse_products(text_input)
-    df = pd.DataFrame(product_data)
-    df["주문수량"] = ""
-    df["실수량"] = ""
-
-    st.success("정리 완료! 아래에서 엑셀로 저장할 수 있어요 ✅")
-    st.dataframe(df, use_container_width=True)
-
-    def convert_df_to_excel(df):
-        output = BytesIO()
-        with pd.ExcelWriter(output, engine="openpyxl") as writer:
-            df.to_excel(writer, index=False)
-        return output.getvalue()
-
-    excel_data = convert_df_to_excel(df)
-    st.download_button(
-        label="📥 엑셀로 저장하기 (2줄 조건 출력)",
-        data=excel_data,
-        file_name="정리된_상품표.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
-    st.divider()
-    st.button("정리하기")
+if process and text:
+    lines = text.split("\n")
+    parsed = parse_product_lines(lines)
+    if parsed:
+        df = pd.DataFrame(parsed, columns=["상품명", "단위", "단가", "주문수량", "실수량"])
+        st.success("✅ 정리 완료! 아래에서 복사하거나 다운로드하세요.")
+        st.dataframe(df, use_container_width=True, height=len(df) * 35 + 50)
+        csv = df.to_csv(index=False).encode("utf-8-sig")
+        st.download_button("📥 엑셀로 다운로드", csv, file_name="band_products.csv", mime="text/csv")
+    else:
+        st.warning("상품 정보가 정상적으로 감지되지 않았어요. 다시 확인해 주세요.")

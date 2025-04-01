@@ -2,6 +2,7 @@
 import streamlit as st
 import pandas as pd
 import re
+import io
 from datetime import datetime
 
 st.title("📦 밴드 상품 정리기 - 모닝특가 & 공구")
@@ -37,13 +38,12 @@ if st.button("정리하기"):
         st.success("정리 완료! 아래에서 엑셀로 저장할 수 있어요 ✅")
         st.dataframe(df)
 
-        # 엑셀 다운로드
-        def convert_df(df):
-            return df.to_excel(index=False, engine='openpyxl')
-
+        # 엑셀 다운로드용 BytesIO로 변경
+        output = io.BytesIO()
+        df.to_excel(output, index=False, engine='openpyxl')
         st.download_button(
             label="📥 엑셀로 저장하기",
-            data=convert_df(df),
+            data=output.getvalue(),
             file_name="상품정리결과.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )

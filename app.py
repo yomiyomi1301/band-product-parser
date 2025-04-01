@@ -10,10 +10,15 @@ text = st.text_area("밴드 게시글 복사해서 붙여넣기 ✂️", height=
 process = st.button("✅ 정리하기")
 
 def split_unit_from_name(name):
-    unit_keywords = ["한송이", "한봉", "한팩", "한단", "1개", "1봉", "1팩", "1단", "1세트", "한세트"]
+    unit_keywords = ["한송이", "한봉", "한팩", "한단", "1개", "1봉", "1팩", "1단", "1병", "2병", 
+                     "1세트", "한세트", "KG", "kg", "g", "ml", "인분"]
     for keyword in unit_keywords:
         if keyword in name:
             return name.replace(keyword, "").strip(), keyword
+    # 괄호 안 단위 추출 시도
+    match = re.search(r"(\(.*?\))", name)
+    if match:
+        return name.replace(match.group(1), "").strip(), match.group(1)
     return name.strip(), ""
 
 def parse_product_lines(lines):
@@ -23,24 +28,21 @@ def parse_product_lines(lines):
         line = line.strip()
         if not line:
             continue
-        if "👉" not in line and re.search(r"[가-힣]", line):
-            current_name = re.sub(r"^[^가-힣]*", "", line)
+        if "👉" not in line and any(char.isalpha() or '\uac00' <= char <= '\ud7a3' for char in line):
+            current_name = re.sub(r"^[^가-힣a-zA-Z]*", "", line)
         elif "👉" in line:
-            prices = re.findall(r"(\d+[,.]?\d*)원", line.replace(",", ""))
-            units = re.findall(r"(\d+[개봉팩단통세트송이]+|한[개봉팩단통세트송이]+)", line)
+            line = line.replace(",", "").replace("→", "➡")
+            discount_price_match = re.search(r"➡.*?(\d+[,.]?\d*)원", line)
+            if discount_price_match:
+                prices = [discount_price_match.group(1)]
+            else:
+                prices = re.findall(r"(\d+[,.]?\d*)원", line)
+            units = re.findall(r"(1[개봉병팩단세트줄]+|2[개봉병팩단세트줄]+|한[개봉병팩단세트줄]+|\d+g|\d+ml|\d+KG|\d+인분)", line)
             name_only, extracted_unit = split_unit_from_name(current_name)
             if prices:
-                if len(prices) == 1:
-                    price = f"{int(float(prices[0])):,}원"
-                    unit = units[0] if units else extracted_unit
-                    data.append([name_only, unit, price, "", ""])
-                elif len(prices) >= 2:
-                    price1 = f"{int(float(prices[0])):,}원"
-                    price2 = f"{int(float(prices[1])):,}원"
-                    unit1 = units[0] if len(units) >= 1 else extracted_unit
-                    unit2 = units[1] if len(units) >= 2 else unit1
-                    data.append([name_only, unit1, price1, "", ""])
-                    data.append([name_only, unit2 + " (2개이상 시)", price2, "", ""])
+                price = f"{int(float(prices[-1].replace(',', ''))):,}원"  # 할인 가격만 사용
+                unit = units[0] if units else extracted_unit
+                data.append([name_only, unit, price, "", ""])
     return data
 
 if process and text:
